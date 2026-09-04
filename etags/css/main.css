@@ -979,6 +979,16 @@ body.dark-mode .debug {
 	display: flex !important;
 }
 
+/* ---------- 设置面板：屏幕驱动/设备配置仅在调试模式显示 ---------- */
+.settings-section.settings-debug {
+	display: none;
+}
+
+body.show-debug .settings-section.settings-debug,
+body.dark-mode .settings-section.settings-debug {
+	display: block;
+}
+
 /* ---------- Footer ---------- */
 .footer {
 	display: flex;
