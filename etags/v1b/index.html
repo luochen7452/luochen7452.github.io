@@ -30,7 +30,6 @@
 					<span class="filter-label">过滤:</span>
 					<label title="仅显示名称以 NRF 开头的设备"><input type="checkbox" id="filterNRF" checked> NRF</label>
 					<label title="仅显示名称以 TLSR 开头的设备"><input type="checkbox" id="filterTLSR" checked> TLSR</label>
-					<label title="仅显示名称以 DLG 开头的设备"><input type="checkbox" id="filterDLG" checked> DLG</label>
 					<input type="text" id="filterCustom" placeholder="自定义前缀" title="输入设备名前缀进行过滤">
 				</div>
 			</div>
@@ -42,7 +41,6 @@
 			<div class="card-body">
 				<div class="flex-container">
 					<div class="flex-group">
-						<button type="button" class="secondary" onclick="readDlog()" title="读取固件诊断日志(dlog)，诊断连接断开/复位原因">读诊断日志</button>
 						<button id="calendarmodebutton" type="button" class="primary" onclick="syncTime(1)">日历模式</button>
 						<button id="clockmodebutton" type="button" class="primary" onclick="syncTime(2)">时钟模式</button>
 						<button id="clearscreenbutton" type="button" class="secondary" onclick="clearScreen()">清除屏幕</button>
@@ -355,7 +353,7 @@
 	<script type="text/javascript" src="js/dithering.js?v=20260821"></script>
 	<script type="text/javascript" src="js/paint.js?v=20260829"></script>
 	<script type="text/javascript" src="js/crop.js?v=20260829"></script>
-	<script type="text/javascript" src="js/main.js?v=20260910"></script>
+	<script type="text/javascript" src="js/main.js?v=20260827"></script>
 	<script type="text/javascript" src="js/ota.js?v=20260828-tlk"></script>
 	<script>
 		var _hmt = _hmt || [];

@@ -3,8 +3,6 @@ let epdService, epdCharacteristic;
 let startTime, msgIndex, appVersion;
 let canvas, ctx, textDecoder;
 let paintManager, cropManager;
-let fwModels = null;           // 固件支持的屏型号 id 数组（GET_MODELS 回复）
-let modelsResolver = null;     // loadModels() 等待通知的 resolver
 
 // ===== 版本/能力协商 (与固件 EPD_service.h 保持一致) =====
 const WEB_VER = '1.7';                // 前端版本: 改功能后递增 (也用于 CSS/JS 缓存参数)
@@ -33,8 +31,6 @@ const EpdCmd = {
   SYS_SLEEP: 0x92,
   CFG_ERASE: 0x99,
   GET_CMAP: 0xA0,
-  GET_MODELS: 0xA1,
-  GET_DLOG: 0xA2,
 };
 
 const canvasSizes = [
@@ -201,60 +197,6 @@ async function loadE6Cmap() {
   await write(EpdCmd.GET_CMAP);
   if (e6_cmap_loaded) return;
   await promise;
-}
-
-// ===== 屏型号动态协商（GET_MODELS）=====
-// 连接后向固件查询"支持的屏型号 id 列表"，据此过滤驱动下拉，
-// 只显示当前固件实际支持的型号（如 SSD16XX 固件只显示 03/04）。
-async function loadModels() {
-  if (fwModels != null) return;
-  const promise = new Promise((resolve) => { modelsResolver = resolve; });
-  await write(EpdCmd.GET_MODELS, null, true, true);
-  if (fwModels != null) return;
-  await promise;
-}
-
-// 按固件支持的型号过滤"驱动"下拉（隐藏不支持的 option）
-function applyModelFilter() {
-  const sel = document.getElementById("epddriver");
-  if (!sel || !fwModels || fwModels.length === 0) return;
-  const supported = new Set(fwModels.map(id => id.toString(16).padStart(2, '0')));
-  let visible = 0, firstVisible = null;
-  for (const opt of sel.options) {
-    const show = supported.has(opt.value);
-    opt.style.display = show ? '' : 'none';
-    if (show) {
-      visible++;
-      if (firstVisible == null) firstVisible = opt;
-    }
-  }
-  if (visible === 1 && firstVisible) sel.value = firstVisible.value;
-  const ids = fwModels.map(id => id.toString(16).padStart(2, '0').toUpperCase()).join(', ');
-  addLog(`固件支持型号 (${fwModels.length}): ${ids}`);
-  updateDitcherOptions();
-}
-
-// ===== 读取固件诊断日志（GET_DLOG）=====
-// 分片读取 retention dlog 缓冲（复位/断开前固件写入的探针日志），
-// 用于诊断 macOS 下连接断开/复位的原因。请求 [0xA2, off_lo, off_hi]，
-// 固件回复 [0xA2, off_lo, off_hi, len, data...]；len=0 表示读完。
-let dlogChunks = [], dlogResolver = null;
-
-async function readDlog() {
-  if (!epdCharacteristic) { addLog("未连接，无法读取诊断日志"); return; }
-  addLog("读取诊断日志 (dlog)…");
-  dlogChunks = [];
-  const promise = new Promise((resolve) => { dlogResolver = resolve; });
-  await write(EpdCmd.GET_DLOG, "0000", true, true);
-  await promise;
-  const text = dlogChunks.join('');
-  addLog("======= dlog 诊断日志 =======");
-  if (!text.trim()) {
-    addLog("(空 — 固件未写入诊断日志)");
-  } else {
-    for (const line of text.split('\n')) { if (line.trim()) addLog(line); }
-  }
-  addLog("======= 结束 =======");
 }
 
 function splitE6Phases(data4bpp, cmap1, cmap2) {
@@ -779,7 +721,6 @@ function buildRequestOptions() {
   const filters = [];
   if (document.getElementById("filterNRF").checked) filters.push({ namePrefix: 'NRF' });
   if (document.getElementById("filterTLSR").checked) filters.push({ namePrefix: 'TLSR' });
-  if (document.getElementById("filterDLG").checked) filters.push({ namePrefix: 'DLG' });
   const custom = document.getElementById("filterCustom").value.trim();
   if (custom) filters.push({ namePrefix: custom });
 
@@ -829,7 +770,7 @@ async function reConnect() {
   setTimeout(async function () { await connect(); }, 300);
 }
 
-async function handleNotify(value, idx) {
+function handleNotify(value, idx) {
   const data = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
   if (idx == 0) {
     addLog(`收到配置：${bytes2hex(data)}`);
@@ -849,25 +790,6 @@ async function handleNotify(value, idx) {
     e6_cmap_loaded = true;
     addLog(`已加载E6 cmap: phase1=${bytes2hex(data.slice(0,16))}`);
     if (e6_cmapResolver) { e6_cmapResolver(); e6_cmapResolver = null; }
-  } else if (data[0] === 0xA1 && data.length >= 2) {
-    // 屏型号列表 (GET_MODELS 回复): [0xA1, count, id0, id1, ...]
-    const count = data[1];
-    fwModels = Array.from(data.slice(2, 2 + count));
-    addLog(`型号协商: ${fwModels.length} 个 (${fwModels.map(x => x.toString(16).padStart(2,'0').toUpperCase()).join(', ')})`);
-    applyModelFilter();
-    if (modelsResolver) { modelsResolver(); modelsResolver = null; }
-  } else if (data[0] === 0xA2) {
-    // 诊断日志分片 (GET_DLOG 回复): [0xA2, off_lo, off_hi, len, data...]
-    const off = data[1] | (data[2] << 8);
-    const len = data[3];
-    if (len > 0) {
-      if (textDecoder == null) textDecoder = new TextDecoder();
-      dlogChunks.push(textDecoder.decode(data.slice(4, 4 + len)));
-      const nextOff = off + len;
-      await write(EpdCmd.GET_DLOG, nextOff.toString(16).padStart(4, '0'), true, true);
-    } else if (dlogResolver) {
-      dlogResolver(); dlogResolver = null;
-    }
   } else {
     if (textDecoder == null) textDecoder = new TextDecoder();
     const msg = textDecoder.decode(data);
@@ -902,10 +824,9 @@ async function connect() {
     return;
   }
 
-  let versionData = null;
   try {
     const versionCharacteristic = await epdService.getCharacteristic('62750003-d828-918d-fb46-b6c11c675aec');
-    versionData = await versionCharacteristic.readValue();
+    const versionData = await versionCharacteristic.readValue();
     appVersion = versionData.getUint8(0);
     if (versionData.byteLength >= 3) {
       // 新协议: [大版本, 小版本, 能力低字节, 能力高字节]
@@ -923,24 +844,6 @@ async function connect() {
   } catch (e) {
     console.error(e);
     appVersion = 0x15;
-  }
-
-  // 版本段判定（0x60 升级后路由）:
-  //   - 多字节 0x1B（旧私有固件 1b+小版本号）→ 跳旧版上位机（保底收留, /etags/v1b/）
-  //   - 多字节 0x60（当前固件）→ 正常使用
-  //   - 单字节 ≥0x16（开源固件 / 只有 1b 无小版本号）→ 跳转开源页面
-  //   - 单字节 <0x16 → 极旧固件 → 走下方旧版提示
-  if (versionData && versionData.byteLength >= 3 && fwMajor === 0x1B) {
-    const oldVerURL = "https://luochen7452.github.io/etags/v1b/";
-    alert(`检测到旧版固件 (1b.${fwMinor})。\n本页面已升级，仅支持新版固件 (60.x)。\n即将跳转旧版上位机…`);
-    location.href = oldVerURL;
-    return;
-  }
-  if (versionData && versionData.byteLength < 3 && fwMajor >= 0x16) {
-    const openSrcURL = "https://luochen7452.github.io/EPD-nRF5_tsl0922/";
-    alert("检测到开源版本固件（单字节版本，无小版本号）。\n本页面仅支持私有协议固件。\n即将跳转开源版上位机…");
-    location.href = openSrcURL;
-    return;
   }
 
   if (appVersion < 0x16) {
@@ -961,11 +864,6 @@ async function connect() {
     console.error(e);
     if (e.message) addLog("startNotifications: " + e.message);
   }
-
-  // 型号协商：查询固件支持的屏型号，过滤驱动下拉（旧固件无 GET_MODELS 则跳过）
-  try {
-    await loadModels();
-  } catch (e) { console.error(e); }
 
   await write(EpdCmd.INIT);
 
