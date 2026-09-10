@@ -937,7 +937,7 @@ async function connect() {
     return;
   }
   if (versionData && versionData.byteLength < 3 && fwMajor >= 0x16) {
-    const openSrcURL = "https://luochen7452.github.io/EPD-nRF5_tsl0922/";
+    const openSrcURL = "https://tsl0922.github.io/EPD-nRF5/?debug=true";
     alert("检测到开源版本固件（单字节版本，无小版本号）。\n本页面仅支持私有协议固件。\n即将跳转开源版上位机…");
     location.href = openSrcURL;
     return;
