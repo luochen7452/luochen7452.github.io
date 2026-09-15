@@ -160,6 +160,16 @@ function resetVariables() {
   epdCharacteristic = null;
   msgIndex = 0;
   fwMajor = 0; fwMinor = 0; fwCaps = 0;
+  // 清除上一个连接固件的型号/cmap 缓存，确保下次连接时重新协商（GET_MODELS/GET_CMAP）
+  fwModels = null;
+  e6_cmap_loaded = false;
+  e6_cmap1 = [1,1,2,3, 0,1,0,1, 1,1,1,1, 1,1,1,1];
+  e6_cmap2 = [0,1,1,3, 1,2,1,1, 1,1,1,1, 1,1,1,1];
+  // 若有上一次连接遗留的等待者，先放行，避免旧 Promise 悬挂
+  if (modelsResolver) { modelsResolver(); modelsResolver = null; }
+  if (e6_cmapResolver) { e6_cmapResolver(); e6_cmapResolver = null; }
+  // 恢复驱动下拉全部选项可见，避免上次固件的型号过滤残留
+  resetModelFilter();
   document.getElementById("log").value = '';
 }
 
@@ -208,10 +218,19 @@ async function loadE6Cmap() {
 // 只显示当前固件实际支持的型号（如 SSD16XX 固件只显示 03/04）。
 async function loadModels() {
   if (fwModels != null) return;
+  // 兜底超时：旧固件无 GET_MODELS 回复时不至于卡死连接流程
+  const timeout = new Promise((resolve) => setTimeout(resolve, 3000));
   const promise = new Promise((resolve) => { modelsResolver = resolve; });
   await write(EpdCmd.GET_MODELS, null, true, true);
   if (fwModels != null) return;
-  await promise;
+  await Promise.race([promise, timeout]);
+}
+
+// 恢复"驱动"下拉全部选项可见（断开/重新连接前调用）
+function resetModelFilter() {
+  const sel = document.getElementById("epddriver");
+  if (!sel) return;
+  for (const opt of sel.options) opt.style.display = '';
 }
 
 // 按固件支持的型号过滤"驱动"下拉（隐藏不支持的 option）
