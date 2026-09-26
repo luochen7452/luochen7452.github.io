@@ -7,7 +7,7 @@ let fwModels = null;           // 固件支持的屏型号 id 数组（GET_MODEL
 let modelsResolver = null;     // loadModels() 等待通知的 resolver
 
 // ===== 版本/能力协商 (与固件 EPD_service.h 保持一致) =====
-const WEB_VER = '1.7';                // 前端版本: 改功能后递增 (也用于 CSS/JS 缓存参数)
+const WEB_VER = '1.8';                // 前端版本: 改功能后递增 (也用于 CSS/JS 缓存参数)
 const CAP_RLE_V16 = 1 << 0;           // 0x30 配置字 RLE (原仓库 v1.6 格式)
 const CAP_HEATSHRINK = 1 << 1;        // 0x31 Heatshrink (本 fork)
 const CAP_E6_CMAP = 1 << 2;           // E6 双相 + GET_CMAP
@@ -848,9 +848,46 @@ async function reConnect() {
   setTimeout(async function () { await connect(); }, 300);
 }
 
+// 配置包识别：不能用"第 0 条通知"来判断。
+// 固件在 CCCD 订阅成功和首次 INIT 时都会回传配置（协议规定：见 EPD_service.h 的
+// epd_service_send_config；TLSR 见 EPD_service_platform.c 的 epd_ble_cccd_write 与
+// CMD_Q_INIT 的 g_init_done 分支），而且订阅那一条可能早于 startNotifications() 的
+// 监听注册而丢失。按位置判断有两个毛病：
+//   1) 第二条配置（INIT 回传）落到文本分支 → 日志里打印成乱码；
+//   2) 订阅那条丢了时，第一条通知是 GET_MODELS 回复 [0xA1, count, ids...]，会被
+//      误判成配置吃掉 → 型号列表永远协商不到，驱动下拉不会被过滤。
+// 所以按内容判断：epd_config_t 是 13~16 字节的二进制包（引脚/型号/模式等编码字节
+// 必然 <0x20 或 >=0x7f），而文本通知（mtu=/t=/mdl=/g=/T7 ...）全是可打印 ASCII。
+// 注意：这里**不能**简单排除"首字节 0xA1"——设备引脚字段一旦被写坏，配置包自己就会
+// 以 0xA1 开头（实测 a1 0c 01 02 08 09 06 04 ff ff 0b 01 00 01，14 字节，长度还恰好
+// 自洽），必须靠 isModelsReply() 的内容校验把它挡回配置分支。
+function isConfigPacket(data) {
+  if (data.length < 13 || data.length > 16) return false;  // 当前 EPD_CONFIG_SIZE = 14
+  if (data[0] === 0xA0 || data[0] === 0xA2) return false;  // cmap / 诊断日志分片（首字节固定）
+  for (const b of data) if (b < 0x20 || b >= 0x7f) return true;
+  return false;
+}
+
+// 型号列表回复 [0xA1, count, id0, id1...]：
+//   1) count 必须与长度自洽（否则不是这个包）；
+//   2) id 必须互不重复，且都是"驱动"下拉里已知的型号。
+// 第 2 条是关键：被写坏的配置包虽然首字节是 0xA1 且长度自洽，但它的"id"里会出现
+// FF/00/重复值，靠这一条才能识别出来。
+function isModelsReply(data) {
+  if (data[0] !== 0xA1 || data.length < 3) return false;
+  if (data.length !== data[1] + 2) return false;
+  const ids = Array.from(data.slice(2));
+  if (new Set(ids).size !== ids.length) return false;   // 型号 id 不会重复
+  const sel = document.getElementById('epddriver');
+  if (!sel) return true;                                // 拿不到下拉时退化为结构判断
+  const known = new Set(Array.from(sel.options).map(o => o.value.toLowerCase()));
+  return ids.every(id => known.has(id.toString(16).padStart(2, '0')));
+}
+
 async function handleNotify(value, idx) {
   const data = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-  if (idx == 0) {
+  const models = isModelsReply(data);
+  if (!models && isConfigPacket(data)) {
     addLog(`收到配置：${bytes2hex(data)}`);
     const epdpins = document.getElementById("epdpins");
     const epddriver = document.getElementById("epddriver");
@@ -868,7 +905,7 @@ async function handleNotify(value, idx) {
     e6_cmap_loaded = true;
     addLog(`已加载E6 cmap: phase1=${bytes2hex(data.slice(0,16))}`);
     if (e6_cmapResolver) { e6_cmapResolver(); e6_cmapResolver = null; }
-  } else if (data[0] === 0xA1 && data.length >= 2) {
+  } else if (models) {
     // 屏型号列表 (GET_MODELS 回复): [0xA1, count, id0, id1, ...]
     const count = data[1];
     fwModels = Array.from(data.slice(2, 2 + count));
