@@ -47,6 +47,9 @@
 						<button id="clockmodebutton" type="button" class="primary" onclick="syncTime(2)">时钟模式</button>
 						<button id="clearscreenbutton" type="button" class="secondary" onclick="clearScreen()">清除屏幕</button>
 					</div>
+					<div class="flex-group right" id="holiday-group" style="display:none;">
+						<button id="holidaysyncbutton" type="button" class="primary" onclick="syncHolidays()" title="从 timor.tech 在线获取本机当前年份的放假/调休数据并同步">同步节假日</button>
+					</div>
 					<div class="flex-group right">
 						<label><input type="checkbox" id="ganzhiEnable" onchange="setGanzhi()"> 天干地支</label>
 					</div>
@@ -355,7 +358,7 @@
 	<script type="text/javascript" src="js/dithering.js?v=20260821"></script>
 	<script type="text/javascript" src="js/paint.js?v=20260829"></script>
 	<script type="text/javascript" src="js/crop.js?v=20260829"></script>
-	<script type="text/javascript" src="js/main.js?v=20260925b"></script>
+	<script type="text/javascript" src="js/main.js?v=20261001"></script>
 	<script type="text/javascript" src="js/ota.js?v=20260828-tlk"></script>
 	<script>
 		var _hmt = _hmt || [];

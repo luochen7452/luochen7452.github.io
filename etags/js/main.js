@@ -7,11 +7,13 @@ let fwModels = null;           // 固件支持的屏型号 id 数组（GET_MODEL
 let modelsResolver = null;     // loadModels() 等待通知的 resolver
 
 // ===== 版本/能力协商 (与固件 EPD_service.h 保持一致) =====
-const WEB_VER = '1.8';                // 前端版本: 改功能后递增 (也用于 CSS/JS 缓存参数)
+const WEB_VER = '1.9';                // 前端版本: 改功能后递增 (也用于 CSS/JS 缓存参数)
 const CAP_RLE_V16 = 1 << 0;           // 0x30 配置字 RLE (原仓库 v1.6 格式)
 const CAP_HEATSHRINK = 1 << 1;        // 0x31 Heatshrink (本 fork)
 const CAP_E6_CMAP = 1 << 2;           // E6 双相 + GET_CMAP
 const CAP_WEEK_START = 1 << 3;        // SET_WEEK_START
+const CAP_OTA = 1 << 4;               // 支持 OTA
+const CAP_HOLIDAY = 1 << 5;           // SET_HOLIDAYS 节假日同步
 let fwMajor = 0, fwMinor = 0, fwCaps = 0;  // 当前连接固件的版本/能力
 
 const EpdCmd = {
@@ -24,6 +26,8 @@ const EpdCmd = {
   SLEEP: 0x06,
 
   SET_TIME: 0x20,
+  SET_WEEK_START: 0x21,
+  SET_HOLIDAYS: 0x22,
 
   WRITE_IMG: 0x30, // v1.6
   WRITE_IMG_RLE: 0x31,
@@ -306,6 +310,8 @@ function capNames(caps) {
   if (caps & CAP_HEATSHRINK) names.push('Heatshrink');
   if (caps & CAP_E6_CMAP) names.push('E6');
   if (caps & CAP_WEEK_START) names.push('WeekStart');
+  if (caps & CAP_OTA) names.push('OTA');
+  if (caps & CAP_HOLIDAY) names.push('Holiday');
   return names.length ? names.join(',') : '无';
 }
 
@@ -613,6 +619,88 @@ async function clearScreen() {
   }
 }
 
+// ===== 节假日同步（timor.tech 在线接口 → BLE 分块上传） =====
+// 条目编码与固件内置表一致: uint16 = (work<<12)|(month<<8)|day
+//   holiday:true → 放假(休) work=0; holiday:false → 补班(班) work=1
+async function fetchHolidays(year) {
+  // 整年接口一次返回 12 个月全部数据；也支持按月接口 .../year/YYYY-MM
+  const url = `https://timor.tech/api/holiday/year/${year}`;
+  addLog(`请求: ${url}`);
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const json = await resp.json();
+  if (json.code !== 0 || !json.holiday) throw new Error('API 返回异常');
+
+  const entries = [];
+  for (const [key, item] of Object.entries(json.holiday)) {
+    // key 形如 "MM-DD"
+    const parts = key.split('-');
+    if (parts.length !== 2) continue;
+    const month = parseInt(parts[0], 10);
+    const day = parseInt(parts[1], 10);
+    if (!(month >= 1 && month <= 12 && day >= 1 && day <= 31)) continue;
+    const work = item.holiday ? 0 : 1;   // 放假→休(0), 补班→班(1)
+    entries.push((work << 12) | (month << 8) | day);
+  }
+  // 按 月/日 排序，保持发送顺序稳定
+  entries.sort((a, b) => (a & 0xFFF) - (b & 0xFFF));
+  return entries;
+}
+
+async function syncHolidays() {
+  if (!epdCharacteristic) {
+    addLog("未连接设备，无法同步节假日");
+    return;
+  }
+  if (!hasCap(CAP_HOLIDAY)) {
+    addLog("当前固件不支持节假日同步 (需要 EPD_CAP_HOLIDAY)");
+    return;
+  }
+  // 只同步本机当前年份：固件按设备年份查询/显示节假日，非当前年份的数据会被舍掉
+  const year = new Date().getFullYear();
+
+  let entries;
+  try {
+    entries = await fetchHolidays(year);
+  } catch (e) {
+    addLog("获取节假日数据失败: " + e.message);
+    return;
+  }
+  if (entries.length === 0) {
+    addLog("未获取到节假日数据");
+    return;
+  }
+  addLog(`获取到 ${year} 年节假日/调休 ${entries.length} 条，开始同步…`);
+
+  // 分块: write() 会把命令字节拼到最前, 所以整包 = 1(cmd) + 8(头) + 2*n ≤ mtu
+  const mtu = parseInt(document.getElementById('mtusize').value) || 20;
+  const headerLen = 8;   // [y_hi,y_lo,total_hi,total_lo,off_hi,off_lo,count]
+  const maxEntries = Math.max(1, Math.floor((mtu - 1 - headerLen) / 2));
+  const total = entries.length;
+
+  for (let offset = 0; offset < total; offset += maxEntries) {
+    const chunk = entries.slice(offset, offset + maxEntries);
+    const payload = [
+      (year >> 8) & 0xFF, year & 0xFF,
+      (total >> 8) & 0xFF, total & 0xFF,
+      (offset >> 8) & 0xFF, offset & 0xFF,
+      chunk.length,
+    ];
+    for (const e of chunk) payload.push((e >> 8) & 0xFF, e & 0xFF);
+    setStatus(`节假日: ${offset + chunk.length}/${total}`);
+    if (!(await write(EpdCmd.SET_HOLIDAYS, payload, true, true))) {
+      addLog("同步中断");
+      return;
+    }
+  }
+  setStatus('节假日同步完成');
+  addLog("节假日同步完成！固件已保存。");
+  // 自动对时并刷新: 确保设备时间=本机当前年份, 同步数据才能匹配显示。
+  // （设备出厂/未对时时间可能与当前年份不一致, GetHoliday 按设备年份查询）
+  await syncTime(1);
+  addLog(`已对时并刷新日历 (${year} 年)。`);
+}
+
 async function sendcmd() {
   const cmdTXT = document.getElementById('cmdTXT').value;
   if (cmdTXT == '') return;
@@ -785,6 +873,11 @@ function updateButtonStatus(forceDisabled = false) {
   document.getElementById("clearscreenbutton").disabled = status;
   document.getElementById("sendimgbutton").disabled = status;
   document.getElementById("setDriverbutton").disabled = status;
+  const holidayBtn = document.getElementById("holidaysyncbutton");
+  if (holidayBtn) holidayBtn.disabled = status;
+  // 节假日同步按钮按固件能力显示/隐藏
+  const holidayGrp = document.getElementById("holiday-group");
+  if (holidayGrp) holidayGrp.style.display = (!connected || !hasCap(CAP_HOLIDAY)) ? 'none' : '';
 }
 
 function disconnect() {
