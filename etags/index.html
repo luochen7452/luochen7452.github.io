@@ -75,14 +75,18 @@
 							<option value="1.54_200_200">1.54 (200x200)</option>
 							<option value="2.13_104_212">2.13 (104x212)</option>
 							<option value="2.13_122_250">2.13 (122x250)</option>
+							<option value="2.13_212_104">2.13 (212x104)</option>
+							<option value="2.13_250_122">2.13 (250x122)</option>
 							<option value="2.66_152_296">2.66 (152x296)</option>
 							<option value="2.66_184_360">2.66 (184x360)</option>
 							<option value="2.9_128_296">2.9 (128x296)</option>
+							<option value="2.9_296_128">2.9 (296x128)</option>
 							<option value="2.9_168_384">2.9 (168x384)</option>
 							<option value="3.5_184_384">3.5 (184x384)</option>
 							<option value="3.5_360_600">3.5 (360x600)</option>
 							<option value="3.7_240_416">3.7 (240x416)</option>
 							<option value="3.7_280_480">3.7 (280x480)</option>
+							<option value="3.7_416_240">3.7 (416x240)</option>
 							<option value="3.97_800_480">3.97 (800x480)</option>
 							<option value="3.68_792_528">3.68 (792x528)</option>
 							<option value="3.98_768_552">3.98 (768x552)</option>
@@ -295,22 +299,41 @@
 				<div class="settings-row">
 					<span class="settings-label">驱动</span>
 					<select id="epddriver" onchange="updateDitcherOptions()">
+						<!-- 型号清单与固件注册表（common/epd/EPD_model.c + epd_model_id_t）同步：
+							21 项全部有固件对应型号，按尺寸分组；运行时仍以 GET_MODELS
+							协商结果过滤（applyModelFilter）。改动任一侧需同步另一侧。 -->
+						<!-- 4.2寸 -->
 						<option value="01" data-color="blackWhiteColor" data-size="4.2_400_300">4.2寸 (黑白, UC8176)</option>
 						<option value="02" data-color="threeColor" data-size="4.2_400_300">4.2寸 (三色, UC8176)</option>
 						<option value="03" data-color="blackWhiteColor" data-size="4.2_400_300">4.2寸 (黑白, SSD1619)</option>
 						<option value="04" data-color="threeColor" data-size="4.2_400_300">4.2寸 (三色, SSD1619)</option>
 						<option value="05" data-color="fourColor" data-size="4.2_400_300">4.2寸 (四色, JD79668)</option>
+						<!-- 5.83寸 -->
 						<option value="0d" data-color="fourColor" data-size="5.83_648_480">5.83寸 (四色, JD79665)</option>
+						<!-- 7.5寸 -->
 						<option value="06" data-color="blackWhiteColor" data-size="7.5_800_480">7.5寸 (黑白, UC8179)</option>
 						<option value="07" data-color="threeColor" data-size="7.5_800_480">7.5寸 (三色, UC8179)</option>
 						<option value="0c" data-color="fourColor" data-size="7.5_800_480">7.5寸 (四色, JD79665)</option>
+						<!-- 7.5寸低分 -->
 						<option value="08" data-color="blackWhiteColor" data-size="7.5_640_384">7.5寸低分 (黑白, UC8159)</option>
 						<option value="09" data-color="threeColor" data-size="7.5_640_384">7.5寸低分 (三色, UC8159)</option>
+						<!-- 7.5寸HD -->
 						<option value="0a" data-color="blackWhiteColor" data-size="7.5_880_528">7.5寸HD (黑白, SSD1677)</option>
 						<option value="0b" data-color="threeColor" data-size="7.5_880_528">7.5寸HD (三色, SSD1677)</option>
+						<!-- 3.7寸 -->
+						<option value="18" data-color="threeColor" data-size="3.7_240_416">3.7寸 (三色, UC8253)</option>
+						<!-- 3.98寸 -->
 						<option value="14" data-color="fourColor" data-size="3.98_768_552">3.98寸A0 (四色, JD79660)</option>
 						<option value="15" data-color="fourColor" data-size="3.98_768_552">3.98寸A1 (四色, JD79661)</option>
+						<!-- 3.68寸 -->
 						<option value="20" data-color="sixColor" data-size="3.68_792_528">3.68寸E6 (六色, JD79xxx)</option>
+						<!-- 2.13寸 -->
+						<option value="19" data-color="blackWhiteColor" data-size="2.13_212_104">2.13寸低分 (黑白, SSD1675)</option>
+						<option value="1a" data-color="blackWhiteColor" data-size="2.13_250_122">2.13寸 (黑白, SSD1675)</option>
+						<option value="21" data-color="threeColor" data-size="2.13_250_122">2.13寸 (三色, SSD1680)</option>
+						<option value="22" data-color="threeColor" data-size="2.13_250_122">2.13寸 (三色, UC81xx)</option>
+						<!-- 2.9寸 -->
+						<option value="1b" data-color="threeColor" data-size="2.9_296_128">2.9寸 (三色, IL3897)</option>
 					</select>
 				</div>
 				<div class="settings-row">
@@ -358,7 +381,7 @@
 	<script type="text/javascript" src="js/dithering.js?v=20260821"></script>
 	<script type="text/javascript" src="js/paint.js?v=20260829"></script>
 	<script type="text/javascript" src="js/crop.js?v=20260829"></script>
-	<script type="text/javascript" src="js/main.js?v=20261001"></script>
+	<script type="text/javascript" src="js/main.js?v=20261021"></script>
 	<script type="text/javascript" src="js/ota.js?v=20260828-tlk"></script>
 	<script>
 		var _hmt = _hmt || [];

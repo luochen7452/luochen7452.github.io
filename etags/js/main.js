@@ -46,14 +46,18 @@ const canvasSizes = [
   { name: '1.54_200_200', width: 200, height: 200 },
   { name: '2.13_104_212', width: 104, height: 212 },
   { name: '2.13_122_250', width: 122, height: 250 },
+  { name: '2.13_212_104', width: 212, height: 104 },
+  { name: '2.13_250_122', width: 250, height: 122 },
   { name: '2.66_152_296', width: 152, height: 296 },
   { name: '2.66_184_360', width: 184, height: 360 },
   { name: '2.9_128_296', width: 128, height: 296 },
+  { name: '2.9_296_128', width: 296, height: 128 },
   { name: '2.9_168_384', width: 168, height: 384 },
   { name: '3.5_184_384', width: 184, height: 384 },
   { name: '3.5_360_600', width: 360, height: 600 },
   { name: '3.7_240_416', width: 240, height: 416 },
   { name: '3.7_280_480', width: 280, height: 480 },
+  { name: '3.7_416_240', width: 416, height: 240 },
   { name: '3.97_800_480', width: 800, height: 480 },
   { name: '3.68_792_528', width: 792, height: 528 },
   { name: '3.98_768_552', width: 768, height: 552 },
@@ -1151,7 +1155,9 @@ function addLog(logTXT, action = '') {
   log.appendChild(logEntry);
   log.scrollTop = log.scrollHeight;
 
-  while (log.childNodes.length > 20) {
+  /* 日志上限：固件排查时一次刷屏就有 T0~T9 十几条，太小会冲掉关键行 */
+  const LOG_MAX_LINES = 200;
+  while (log.childNodes.length > LOG_MAX_LINES) {
     log.removeChild(log.firstChild);
   }
 }
