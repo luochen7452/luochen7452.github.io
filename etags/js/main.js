@@ -7,7 +7,7 @@ let fwModels = null;           // 固件支持的屏型号 id 数组（GET_MODEL
 let modelsResolver = null;     // loadModels() 等待通知的 resolver
 
 // ===== 版本/能力协商 (与固件 EPD_service.h 保持一致) =====
-const WEB_VER = '1.9';                // 前端版本: 改功能后递增 (也用于 CSS/JS 缓存参数)
+const WEB_VER = '1.10';                // 前端版本: 改功能后递增 (也用于 CSS/JS 缓存参数)
 const CAP_RLE_V16 = 1 << 0;           // 0x30 配置字 RLE (原仓库 v1.6 格式)
 const CAP_HEATSHRINK = 1 << 1;        // 0x31 Heatshrink (本 fork)
 const CAP_E6_CMAP = 1 << 2;           // E6 双相 + GET_CMAP
@@ -1078,14 +1078,14 @@ async function connect() {
     appVersion = 0x15;
   }
 
-  // 版本段判定（0x60 升级后路由）:
+  // 版本段判定（0x60/0x61 升级后路由）:
   //   - 多字节 0x1B（旧私有固件 1b+小版本号）→ 跳旧版上位机（保底收留, /etags/v1b/）
-  //   - 多字节 0x60（当前固件）→ 正常使用
+  //   - 多字节 0x60/0x61（当前固件）→ 正常使用
   //   - 单字节 ≥0x16（开源固件 / 只有 1b 无小版本号）→ 跳转开源页面
   //   - 单字节 <0x16 → 极旧固件 → 走下方旧版提示
   if (versionData && versionData.byteLength >= 3 && fwMajor === 0x1B) {
     const oldVerURL = "https://luochen7452.github.io/etags/v1b/";
-    alert(`检测到旧版固件 (1b.${fwMinor})。\n本页面已升级，仅支持新版固件 (60.x)。\n即将跳转旧版上位机…`);
+    alert(`检测到旧版固件 (1b.${fwMinor})。\n本页面已升级，仅支持新版固件 (60.x/61.x)。\n即将跳转旧版上位机…`);
     location.href = oldVerURL;
     return;
   }
@@ -1115,12 +1115,16 @@ async function connect() {
     if (e.message) addLog("startNotifications: " + e.message);
   }
 
-  // 型号协商：查询固件支持的屏型号，过滤驱动下拉（旧固件无 GET_MODELS 则跳过）
+  await write(EpdCmd.INIT);
+
+  // 型号协商：查询固件支持的屏型号，过滤驱动下拉（旧固件无 GET_MODELS 则跳过）。
+  // ⚠️ 必须放在 INIT 往返【之后】：实测 TLSR 连接最初 2~3 秒内的通知会丢——
+  // CCCD 触发的配置回传和 GET_MODELS 首次回复都收不到，loadModels 只能干等
+  // 3s 超时（连接日志表现为 10:53:23 → 10:53:26 的空档），"型号协商/固件支持
+  // 型号"两行日志根本不生成，驱动下拉也不过滤。INIT 往返后通知恢复稳定。
   try {
     await loadModels();
   } catch (e) { console.error(e); }
-
-  await write(EpdCmd.INIT);
 
   document.getElementById("connectbutton").innerHTML = '断开';
   updateButtonStatus();

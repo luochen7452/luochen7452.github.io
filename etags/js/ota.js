@@ -115,15 +115,44 @@ const DFU = {
   MAX_RECONNECTS: 10,        // 断连后最大自动重连次数
   RECONNECT_BACKOFF_MS: 800, // 重连失败后的退避延时 (设备重新广播需时间)
 
-  // ---- nRF52811 S112 预编译 bootloader 的 OTA 容量上限 ----
-  // 逆向自 bl_nrf52811_xxaa_s112.hex (cache_prepare)：
+  // ---- nRF52811 S112 OTA 容量上限（随设备固件大版本自适应）----
+  // 旧 bootloader (0x29000, 逆向自 bl_nrf52811_xxaa_s112.hex cache_prepare):
   //   DFU_REGION_END = 0x29000 - NRF_DFU_APP_DATA_AREA_SIZE(0x2000, 8KB) = 0x27000
   //   最大可 OTA 固件 = 0x27000 - bank0_start(0x19000) = 0xE000 = 57344 B (56KB)
+  // 新 bootloader (0x2A000, NRF_DFU_APP_DATA_AREA_SIZE=0):
+  //   最大可 OTA 固件 = 0x2A000 - 0x19000 = 0x11000 = 69632 B (68KB)
   // 超过上限固件返回 NRF_DFU_RES_CODE_INSUFFICIENT_RESOURCES(4)，
   // 网页表现为「写第一个包后回执无响应 → 超时断连」（并非真正的断连问题）。
-  // 与 device 当前跑的旧固件大小无关（bootloader 允许删旧 app 用满整段）。
-  MAX_APP_SIZE_NRF52811_S112: 0xE000, // 57344 B
+  // 固件 0x61 起 (EPD_APP_VERSION): 上限按「设备固件大版本」自适应 ——
+  // 配套 68KB bootloader 的新固件 (EPD_APP_VERSION >= MIN_FW_VER_NEW_BOOTLOADER)
+  // 用 68KB；低版本设备（旧 56KB bootloader）与版本未知时仍按原 56KB 判断，
+  // 避免误放行导致断连假象。
+  MIN_FW_VER_NEW_BOOTLOADER: 0x61,          // 配套 68KB bootloader 的最低固件大版本 (与 EPD_APP_VERSION 同步)
+  MAX_APP_SIZE_NRF52811_S112_OLD: 0xE000,   // 57344 B (56KB, 旧 bootloader)
+  MAX_APP_SIZE_NRF52811_S112_NEW: 0x11000,  // 69632 B (68KB, 新 bootloader)
 };
+
+// 按当前连接设备的固件大版本返回 OTA 容量上限 (main.js 的 fwMajor):
+//   fwMajor >= MIN_FW_VER_NEW_BOOTLOADER → 68KB (新 bootloader)
+//   低版本或设备未连接/版本未知 → 原 56KB 上限 (保守)
+function dfuMaxAppSize() {
+  const fw = (typeof fwMajor !== 'undefined' && fwMajor) ? fwMajor : 0;
+  return fw >= DFU.MIN_FW_VER_NEW_BOOTLOADER
+    ? DFU.MAX_APP_SIZE_NRF52811_S112_NEW
+    : DFU.MAX_APP_SIZE_NRF52811_S112_OLD;
+}
+
+// 上限判断依据的说明文字（用于日志/提示）。
+function dfuLimitNote() {
+  const fw = (typeof fwMajor !== 'undefined' && fwMajor) ? fwMajor : 0;
+  if (fw >= DFU.MIN_FW_VER_NEW_BOOTLOADER) {
+    return `设备固件 0x${fw.toString(16)}（68KB bootloader）→ 上限 68.0 KB`;
+  }
+  if (fw) {
+    return `设备固件 0x${fw.toString(16)}（旧 56KB bootloader）→ 上限 56.0 KB`;
+  }
+  return '设备未连接/版本未知 → 保守按 56.0 KB 上限';
+}
 
 function dfuOpName(op) {
   const names = { 0x00: 'PROTOCOL_VERSION', 0x01: 'CREATE', 0x02: 'RECEIPT_NOTIF_SET', 0x03: 'CRC_GET', 0x04: 'EXECUTE', 0x06: 'SELECT', 0x07: 'MTU_GET', 0x0C: 'ABORT' };
@@ -665,15 +694,17 @@ async function otaSelectFile(input) {
     }
     // ---- nRF52811 S112 固件大小上限提示 (提前拦截, 避免 DFU 返回
     // INSUFFICIENT_RESOURCES(4) 表现为「写第一个包后断连」的假象) ----
-    if (fwBytes.length > DFU.MAX_APP_SIZE_NRF52811_S112) {
+    // 上限随设备固件大版本自适应 (见 dfuMaxAppSize)。
+    const maxSize = dfuMaxAppSize();
+    if (fwBytes.length > maxSize) {
       const warn = `⚠ 固件大小 ${(fwBytes.length / 1024).toFixed(1)} KB 超过 nRF52811 S112 bootloader 的 OTA 上限 ` +
-        `${(DFU.MAX_APP_SIZE_NRF52811_S112 / 1024).toFixed(1)} KB (${DFU.MAX_APP_SIZE_NRF52811_S112} B)。` +
-        '升级会失败: 写第一个包后无回执→超时断连。请精简固件（如移除 RTT 日志）使其 ≤ 56.0 KB。';
+        `${(maxSize / 1024).toFixed(1)} KB (${maxSize} B)。判断依据: ${dfuLimitNote()}。` +
+        '升级会失败: 写第一个包后无回执→超时断连。请精简固件或先升级设备的 bootloader。';
       addLog(warn);
       const info2 = document.getElementById('otaInfo');
       if (info2) info2.insertAdjacentHTML('beforeend', `<div style="color:#e06c75;font-weight:bold">${warn}</div>`);
     } else {
-      addLog(`固件大小 ${(fwBytes.length / 1024).toFixed(1)} KB ≤ 上限 ${(DFU.MAX_APP_SIZE_NRF52811_S112 / 1024).toFixed(1)} KB，可以 OTA`);
+      addLog(`固件大小 ${(fwBytes.length / 1024).toFixed(1)} KB ≤ 上限 ${(maxSize / 1024).toFixed(1)} KB (${dfuLimitNote()})，可以 OTA`);
     }
     addLog(`OTA 包解析成功: 固件 ${binName} ${(fwBytes.length / 1024).toFixed(1)}KB, init ${initBytes.length}B`);
   } catch (e) {
@@ -1093,10 +1124,12 @@ class DfuClient {
 
     // 0) 前置校验: 固件超过 bootloader 容量上限则直接中止
     //    (超过上限 → DFU 返回 INSUFFICIENT_RESOURCES(4) → 表现为写第一包后断连)
-    if (fwBytes.length > DFU.MAX_APP_SIZE_NRF52811_S112) {
+    //    上限随设备固件大版本自适应 (见 dfuMaxAppSize)。
+    const maxSize = dfuMaxAppSize();
+    if (fwBytes.length > maxSize) {
       throw new Error(`固件大小 ${(fwBytes.length / 1024).toFixed(1)} KB 超过 OTA 上限 ` +
-        `${(DFU.MAX_APP_SIZE_NRF52811_S112 / 1024).toFixed(1)} KB (${DFU.MAX_APP_SIZE_NRF52811_S112} B)。` +
-        '请精简固件（如移除 RTT 日志）使其 ≤ 56.0 KB 后再升级。');
+        `${(maxSize / 1024).toFixed(1)} KB (${maxSize} B)（${dfuLimitNote()}）。` +
+        '请精简固件，或先给设备烧录配套 68KB bootloader 后再升级。');
     }
 
     // 1) 读取当前状态 (对象上限 / 偏移)
